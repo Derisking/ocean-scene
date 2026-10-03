@@ -1,0 +1,1079 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+<meta name="theme-color" content="#07131f" />
+<title>Realtime Ocean Scene</title>
+<style>
+  :root{
+    --panel: rgba(4, 14, 24, .58);
+    --line: rgba(255,255,255,.14);
+    --text: rgba(255,255,255,.96);
+    --muted: rgba(255,255,255,.68);
+  }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body{ margin:0; width:100%; height:100%; overflow:hidden; background:#07131f; color:var(--text);
+    font-family:Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  canvas{ position:fixed; inset:0; width:100%; height:100%; display:block; touch-action:none; }
+
+  #title{
+    position:fixed; left:max(14px, env(safe-area-inset-left)); top:max(14px, env(safe-area-inset-top));
+    z-index:5; padding:10px 12px 9px; border:1px solid var(--line); border-radius:12px;
+    background:var(--panel); backdrop-filter:blur(18px) saturate(1.2); -webkit-backdrop-filter:blur(18px) saturate(1.2);
+    box-shadow:0 10px 40px rgba(0,0,0,.18); pointer-events:none;
+  }
+  #title .jp{ font-size:14px; letter-spacing:.12em; font-weight:650; white-space:nowrap; }
+  #title .sub{ margin-top:4px; font-size:10px; letter-spacing:.16em; text-transform:uppercase; color:var(--muted); }
+
+  #hud{
+    position:fixed; right:max(12px, env(safe-area-inset-right)); top:max(12px, env(safe-area-inset-top));
+    z-index:6; display:flex; flex-direction:column; gap:8px; align-items:flex-end;
+  }
+  .chip{
+    border:1px solid var(--line); border-radius:999px; padding:7px 10px; background:var(--panel);
+    color:var(--muted); font-size:10px; letter-spacing:.08em; text-transform:uppercase;
+    backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px); white-space:nowrap;
+  }
+
+  #controls{
+    position:fixed; z-index:7; left:50%; bottom:max(12px, env(safe-area-inset-bottom));
+    transform:translateX(-50%); display:flex; gap:7px; align-items:center;
+    padding:7px; border:1px solid var(--line); border-radius:18px; background:rgba(4,14,24,.64);
+    backdrop-filter:blur(20px) saturate(1.25); -webkit-backdrop-filter:blur(20px) saturate(1.25);
+    box-shadow:0 16px 50px rgba(0,0,0,.25); max-width:calc(100vw - 20px); overflow:auto hidden;
+    scrollbar-width:none;
+  }
+  #controls::-webkit-scrollbar{ display:none; }
+  button, select{
+    appearance:none; border:1px solid rgba(255,255,255,.12); outline:none; color:white;
+    background:rgba(255,255,255,.08); height:36px; border-radius:12px; padding:0 11px;
+    font:600 11px/1 ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    letter-spacing:.04em; white-space:nowrap;
+  }
+  button:active{ transform:translateY(1px); background:rgba(255,255,255,.14); }
+  button.active{ background:rgba(255,255,255,.18); border-color:rgba(255,255,255,.28); }
+  select{ padding-right:28px; }
+
+  #help{
+    position:fixed; z-index:8; left:50%; bottom:72px; transform:translateX(-50%);
+    width:min(560px, calc(100vw - 26px)); padding:13px 14px; border:1px solid var(--line);
+    border-radius:14px; background:rgba(4,14,24,.82); backdrop-filter:blur(20px);
+    -webkit-backdrop-filter:blur(20px); font-size:12px; line-height:1.45; color:var(--muted);
+    opacity:0; pointer-events:none; transition:opacity .2s ease;
+  }
+  #help.show{ opacity:1; pointer-events:auto; }
+  #help b{ color:var(--text); }
+
+  @media (max-width: 680px){
+    #title .jp{ font-size:13px; }
+    #title .sub{ display:none; }
+    #hud .chip:first-child{ display:none; }
+    #controls{ left:10px; right:10px; transform:none; justify-content:flex-start; }
+    button,select{ height:40px; font-size:12px; }
+  }
+
+  #launchScreen{
+    position:fixed; inset:0; z-index:20; display:flex; align-items:center; justify-content:center;
+    padding:24px; background:
+      radial-gradient(circle at 50% 30%, rgba(53,153,199,.24), transparent 34%),
+      linear-gradient(180deg, rgba(3,10,18,.86), rgba(3,10,18,.96));
+    backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px);
+    transition:opacity .45s ease, visibility .45s ease;
+  }
+  #launchScreen.hidden{ opacity:0; visibility:hidden; pointer-events:none; }
+  #launchCard{
+    width:min(430px, 100%); padding:22px; border:1px solid rgba(255,255,255,.14);
+    border-radius:24px; background:rgba(7,19,31,.72); box-shadow:0 28px 80px rgba(0,0,0,.35);
+  }
+  #launchCard h1{ margin:0 0 8px; font-size:26px; line-height:1.05; letter-spacing:-.025em; }
+  #launchCard p{ margin:0 0 18px; color:var(--muted); font-size:13px; line-height:1.55; }
+  .launchMeta{
+    display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:0 0 16px;
+  }
+  .launchStat{
+    padding:11px 12px; border-radius:14px; background:rgba(255,255,255,.06);
+    border:1px solid rgba(255,255,255,.08);
+  }
+  .launchStat span{ display:block; color:var(--muted); font-size:9px; text-transform:uppercase; letter-spacing:.12em; }
+  .launchStat strong{ display:block; margin-top:4px; font-size:13px; }
+  #enterOcean{
+    width:100%; height:50px; border-radius:15px; border:1px solid rgba(255,255,255,.22);
+    background:rgba(255,255,255,.14); font-size:14px; letter-spacing:.02em;
+  }
+  #enterOcean:active{ background:rgba(255,255,255,.20); }
+  #launchNote{ margin-top:11px; color:rgba(255,255,255,.52); font-size:10px; text-align:center; line-height:1.4; }
+
+</style>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+
+<div id="launchScreen">
+  <div id="launchCard">
+    <h1>Realtime Ocean</h1>
+    <p>This scene automatically scales from iPhone to high-end desktop GPUs. Start with the recommended quality, then raise it anytime from the bottom controls.</p>
+    <div class="launchMeta">
+      <div class="launchStat"><span>Device</span><strong id="deviceClass">Detecting…</strong></div>
+      <div class="launchStat"><span>Recommended</span><strong id="recommendedQuality">Detecting…</strong></div>
+      <div class="launchStat"><span>Screen</span><strong id="screenInfo">—</strong></div>
+      <div class="launchStat"><span>GPU mode</span><strong id="gpuMode">High performance</strong></div>
+    </div>
+    <button id="enterOcean">Enter Ocean</button>
+    <div id="launchNote">Tip: rotate your phone to landscape for the most immersive view.</div>
+  </div>
+</div>
+
+<div id="title">
+  <div class="jp" id="modeLabel">Bright Sunny Midday</div>
+  <div class="sub">Realtime ocean study</div>
+</div>
+
+<div id="hud">
+  <div class="chip" id="perf">— fps</div>
+  <div class="chip" id="qualityReadout">quality: —</div>
+</div>
+
+<div id="controls" aria-label="Ocean controls">
+  <button data-mode="0" class="active">1 · Sunny</button>
+  <button data-mode="1">2 · Shallows</button>
+  <button data-mode="2">3 · Evening</button>
+  <button data-mode="3">4 · Storm</button>
+  <button id="autoBtn" class="active">Auto</button>
+  <select id="quality" aria-label="Quality preset">
+    <option value="auto">Auto quality</option>
+    <option value="mobile">Mobile</option>
+    <option value="balanced">Balanced</option>
+    <option value="high">High</option>
+    <option value="ultra">Ultra</option>
+  </select>
+  <button id="helpBtn">?</button>
+</div>
+
+<div id="help">
+  <b>Touch / mouse:</b> drag to orbit, pinch or wheel to zoom. Tap <b>Auto</b> to return to the cinematic camera.
+  Keys <b>1–4</b> switch atmospheres, <b>A</b> toggles autopilot, <b>Q</b> cycles quality, <b>H</b> hides this panel.
+  <br><br>
+  For iPhone development, edit this one file in any HTML-capable editor or paste it into a browser playground. For best local reliability on macOS, serve it over HTTP rather than opening via <code>file://</code>.
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+/* ============================================================
+   Single-file realtime ocean
+   - Custom Gerstner-water shader
+   - Procedural foam / caustics / sky clouds
+   - Irregular CPU-generated rock meshes
+   - Mobile-first adaptive quality
+   - Cinematic camera + OrbitControls
+   ============================================================ */
+
+const $ = s => document.querySelector(s);
+const modeLabel = $('#modeLabel');
+const perfEl = $('#perf');
+const qualityReadout = $('#qualityReadout');
+const qualitySelect = $('#quality');
+const autoBtn = $('#autoBtn');
+const help = $('#help');
+const launchScreen = $('#launchScreen');
+const deviceClassEl = $('#deviceClass');
+const recommendedQualityEl = $('#recommendedQuality');
+const screenInfoEl = $('#screenInfo');
+const enterOceanBtn = $('#enterOcean');
+
+const labels = [
+  'Bright Sunny Midday',
+  'Caustic Shallows',
+  'Golden Hour',
+  'After the Rain'
+];
+
+// ---------- Capability / quality system ----------
+const isTouch = matchMedia('(pointer: coarse)').matches;
+const smallScreen = Math.min(innerWidth, innerHeight) < 700;
+const cores = navigator.hardwareConcurrency || 4;
+const memory = navigator.deviceMemory || 4;
+
+const PRESETS = {
+  mobile:   { pixelRatio: 0.78, waterSeg: 180, cloudSteps: 4, waveCount: 4, rockDetail: 22, antialias:false },
+  balanced: { pixelRatio: 1.00, waterSeg: 240, cloudSteps: 5, waveCount: 5, rockDetail: 28, antialias:true  },
+  high:     { pixelRatio: 1.30, waterSeg: 320, cloudSteps: 6, waveCount: 6, rockDetail: 34, antialias:true  },
+  ultra:    { pixelRatio: 1.70, waterSeg: 420, cloudSteps: 7, waveCount: 6, rockDetail: 42, antialias:true  }
+};
+
+function autoPresetName(){
+  if (smallScreen || memory <= 4 || cores <= 4) return 'mobile';
+  if (memory >= 8 && cores >= 10 && devicePixelRatio <= 2.2) return 'high';
+  return 'balanced';
+}
+
+function deviceClassName(){
+  const ua = navigator.userAgent || '';
+  const isiPhone = /iPhone/i.test(ua);
+  const isiPad = /iPad/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const isMac = /Macintosh|Mac OS X/i.test(ua) && !isiPad;
+  const isWindows = /Windows/i.test(ua);
+
+  if (isiPhone) return 'iPhone';
+  if (isiPad) return 'iPad';
+  if (isMac) return 'Mac';
+  if (isWindows && cores >= 12) return 'Desktop PC';
+  if (isWindows) return 'Windows PC';
+  if (isTouch) return 'Mobile device';
+  return 'Desktop browser';
+}
+
+function updateLaunchSummary(){
+  const recommended = autoPresetName();
+  deviceClassEl.textContent = deviceClassName();
+  recommendedQualityEl.textContent = recommended[0].toUpperCase() + recommended.slice(1);
+  screenInfoEl.textContent = `${innerWidth}×${innerHeight} · ${devicePixelRatio.toFixed(1)}× DPR`;
+}
+updateLaunchSummary();
+
+let qualityName = autoPresetName();
+let quality = PRESETS[qualityName];
+let dynamicScale = 1.0;
+
+function effectivePixelRatio(){
+  return Math.min(devicePixelRatio * quality.pixelRatio * dynamicScale, qualityName === 'ultra' ? 2.6 : 2.1);
+}
+
+// ---------- Renderer / scene ----------
+const renderer = new THREE.WebGLRenderer({
+  antialias: quality.antialias,
+  powerPreference: 'high-performance',
+  alpha: false,
+  depth: true,
+  stencil: false
+});
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(effectivePixelRatio());
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.02;
+document.body.prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x5f9fb3, 0.0026);
+
+const camera = new THREE.PerspectiveCamera(56, innerWidth / innerHeight, 0.15, 1200);
+camera.position.set(18, 10, 26);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.045;
+controls.minDistance = 3.5;
+controls.maxDistance = 95;
+controls.maxPolarAngle = Math.PI * 0.495;
+controls.target.set(0, 0, 0);
+controls.enabled = true;
+
+let sceneStarted = false;
+let autopilot = true;
+let userInteracting = false;
+controls.addEventListener('start', () => {
+  userInteracting = true;
+  autopilot = false;
+  autoBtn.classList.remove('active');
+});
+controls.addEventListener('end', () => { userInteracting = false; });
+
+// ---------- Lighting ----------
+const hemi = new THREE.HemisphereLight(0x99d8ff, 0x08111a, 1.7);
+scene.add(hemi);
+
+const sun = new THREE.DirectionalLight(0xfff4d7, 5.0);
+sun.position.set(-18, 34, 16);
+scene.add(sun);
+
+// ---------- Shared uniforms ----------
+const shared = {
+  uTime: { value: 0 },
+  uMode: { value: 0 },
+  uSunDir: { value: new THREE.Vector3(-0.35, 0.82, 0.44).normalize() },
+  uCameraPos: { value: camera.position.clone() }
+};
+
+// Rock centers are also used by the water shader to create shallow turquoise
+// halos and foam interaction around partially submerged formations.
+const ROCKS = [
+  { x:-12, z:-5,  r:5.3, h:6.0, seed:1.1 },
+  { x: -3, z: 7,  r:3.2, h:4.8, seed:2.9 },
+  { x:  8, z:-10, r:4.3, h:5.5, seed:4.6 },
+  { x: 15, z: 5,  r:2.8, h:3.9, seed:6.2 },
+  { x:  3, z: 16, r:2.1, h:3.2, seed:7.7 },
+  { x:-20, z:13,  r:2.4, h:3.5, seed:9.0 }
+];
+
+// ---------- Gerstner water shader ----------
+const MAX_WAVES = 6;
+const waveDir = [
+  new THREE.Vector2( 1.00,  0.15).normalize(),
+  new THREE.Vector2( 0.20,  1.00).normalize(),
+  new THREE.Vector2(-0.85,  0.35).normalize(),
+  new THREE.Vector2( 0.65, -0.76).normalize(),
+  new THREE.Vector2(-0.30, -0.95).normalize(),
+  new THREE.Vector2( 0.94,  0.62).normalize()
+];
+const waveData = [
+  new THREE.Vector4(0.78, 21.0, 0.62, 0.72), // amplitude, wavelength, speed, steepness
+  new THREE.Vector4(0.40, 11.5, 0.88, 0.66),
+  new THREE.Vector4(0.25,  7.0, 1.15, 0.54),
+  new THREE.Vector4(0.16,  4.1, 1.42, 0.45),
+  new THREE.Vector4(0.09,  2.5, 1.70, 0.35),
+  new THREE.Vector4(0.05,  1.4, 2.10, 0.27)
+];
+
+const rockPositions = Array.from({length:8}, (_,i) =>
+  i < ROCKS.length ? new THREE.Vector3(ROCKS[i].x, ROCKS[i].z, ROCKS[i].r) : new THREE.Vector3(999,999,0)
+);
+
+const waterVertex = /* glsl */`
+precision highp float;
+
+uniform float uTime;
+uniform float uStorm;
+uniform int uWaveCount;
+uniform vec2 uWaveDir[${MAX_WAVES}];
+uniform vec4 uWaveData[${MAX_WAVES}];
+
+varying vec3 vWorldPos;
+varying vec3 vWorldNormal;
+varying float vCrest;
+varying vec2 vXZ;
+
+// Gerstner waves move each vertex both vertically and horizontally.
+// phase = k * dot(direction, position) - omega * time
+// steepness adds the distinctive rolling / trochoidal shape.
+void gerstner(
+  in vec2 xz,
+  in vec2 dir,
+  in vec4 data,
+  in float time,
+  inout vec3 p,
+  inout vec3 tangent,
+  inout vec3 binormal,
+  inout float crest
+){
+  float A = data.x * mix(1.0, 1.75, uStorm);
+  float L = data.y;
+  float speed = data.z * mix(1.0, 1.28, uStorm);
+  float Q = data.w;
+  float k = 6.28318530718 / L;
+  float phase = k * dot(dir, xz) - speed * time * sqrt(9.81 * k);
+  float s = sin(phase);
+  float c = cos(phase);
+
+  p.x += Q * A * dir.x * c;
+  p.z += Q * A * dir.y * c;
+  p.y += A * s;
+
+  tangent += vec3(
+    -Q * A * dir.x * dir.x * k * s,
+     A * dir.x * k * c,
+    -Q * A * dir.x * dir.y * k * s
+  );
+  binormal += vec3(
+    -Q * A * dir.x * dir.y * k * s,
+     A * dir.y * k * c,
+    -Q * A * dir.y * dir.y * k * s
+  );
+
+  crest += smoothstep(0.48, 0.95, s) * A;
+}
+
+void main(){
+  vec3 p = position;
+  vec3 tangent = vec3(1.0,0.0,0.0);
+  vec3 binormal = vec3(0.0,0.0,1.0);
+  float crest = 0.0;
+
+  for(int i=0;i<${MAX_WAVES};i++){
+    if(i >= uWaveCount) break;
+    gerstner(position.xz, uWaveDir[i], uWaveData[i], uTime, p, tangent, binormal, crest);
+  }
+
+  vec3 n = normalize(cross(binormal, tangent));
+  vec4 world = modelMatrix * vec4(p,1.0);
+
+  vWorldPos = world.xyz;
+  vWorldNormal = normalize(mat3(modelMatrix) * n);
+  vCrest = crest;
+  vXZ = world.xz;
+
+  gl_Position = projectionMatrix * viewMatrix * world;
+}
+`;
+
+const waterFragment = /* glsl */`
+precision highp float;
+
+uniform float uTime;
+uniform float uStorm;
+uniform float uLookDown;
+uniform float uEvening;
+uniform vec3 uSunDir;
+uniform vec3 uCameraPos;
+uniform vec3 uDeepColor;
+uniform vec3 uShallowColor;
+uniform vec3 uSkyColor;
+uniform vec3 uSunColor;
+uniform vec3 uRockPos[8];
+
+varying vec3 vWorldPos;
+varying vec3 vWorldNormal;
+varying float vCrest;
+varying vec2 vXZ;
+
+float hash21(vec2 p){
+  p = fract(p*vec2(123.34, 456.21));
+  p += dot(p,p+45.32);
+  return fract(p.x*p.y);
+}
+float noise(vec2 p){
+  vec2 i=floor(p), f=fract(p);
+  f=f*f*(3.0-2.0*f);
+  return mix(mix(hash21(i),hash21(i+vec2(1,0)),f.x),
+             mix(hash21(i+vec2(0,1)),hash21(i+vec2(1,1)),f.x),f.y);
+}
+float fbm(vec2 p){
+  float f=0.0, a=.5;
+  for(int i=0;i<4;i++){ f+=a*noise(p); p=mat2(1.6,-1.2,1.2,1.6)*p; a*=.5; }
+  return f;
+}
+
+// Cheap procedural caustic approximation: layered moving cell-like ridges.
+// It is intentionally screen-independent, so it remains stable while orbiting.
+float caustics(vec2 p){
+  p *= 0.75;
+  float c = 0.0;
+  for(int i=0;i<3;i++){
+    p = abs(fract(p)-0.5)/max(fwidth(p), vec2(0.002));
+    c += 1.0 / max(min(p.x,p.y), 0.12);
+    p = p*0.68 + vec2(0.17,0.31) + uTime*vec2(.012,-.009);
+  }
+  return smoothstep(7.0,17.0,c);
+}
+
+void main(){
+  vec3 N = normalize(vWorldNormal);
+  vec3 V = normalize(uCameraPos - vWorldPos);
+  vec3 L = normalize(uSunDir);
+  vec3 H = normalize(V + L);
+
+  // Distance to nearby rocks becomes a proxy for shallowness.
+  float dRock = 999.0;
+  for(int i=0;i<8;i++){
+    float d = length(vXZ - uRockPos[i].xy) - uRockPos[i].z;
+    dRock = min(dRock, d);
+  }
+  float shallow = 1.0 - smoothstep(-0.8, 10.0, dRock);
+
+  // Fresnel: more sky reflection at grazing angles.
+  float NoV = max(dot(N,V),0.0);
+  float fresnel = 0.025 + 0.975 * pow(1.0-NoV,5.0);
+
+  vec3 base = mix(uDeepColor, uShallowColor, shallow*0.88);
+  float fakeDepth = clamp(1.0 - shallow*0.72, 0.0, 1.0);
+  base *= mix(1.12, 0.78, fakeDepth);
+
+  float sunSpec = pow(max(dot(N,H),0.0), mix(180.0,70.0,uStorm));
+  float glintNoise = smoothstep(.58,.85,fbm(vXZ*1.9 + uTime*.05));
+  sunSpec *= mix(.72,1.45,glintNoise);
+
+  vec3 reflectedSky = uSkyColor * (0.65 + 0.35*max(N.y,0.0));
+  vec3 color = mix(base, reflectedSky, fresnel*0.62);
+
+  // Caustics are strongest in shallows and in mode 2.
+  float c = caustics(vXZ*0.50 + N.xz*1.8);
+  float causticStrength = shallow * mix(.20,.72,uLookDown);
+  color += vec3(.18,.65,.72) * c * causticStrength;
+
+  // Crest foam + rock interaction foam.
+  float crestFoam = smoothstep(.22,.85,vCrest) * smoothstep(.25,.78,fbm(vXZ*1.15-uTime*.15));
+  float rockFoam = (1.0-smoothstep(-.15,1.35,abs(dRock))) *
+                   smoothstep(.35,.72,fbm(vXZ*2.8 + uTime*.22));
+  float foam = clamp(crestFoam * mix(.28,1.35,uStorm) + rockFoam*.78, 0.0, 1.0);
+  color = mix(color, vec3(.93,.98,1.0), foam*.82);
+
+  color += uSunColor * sunSpec * mix(1.35,1.8,uEvening);
+  color = mix(color, color*vec3(.68,.78,.86), uStorm*.36);
+
+  // Atmospheric distance blend keeps the infinite-looking ocean soft.
+  float dist = length(uCameraPos.xz-vXZ);
+  float haze = smoothstep(95.0,260.0,dist);
+  color = mix(color,uSkyColor*.78,haze*.52);
+
+  gl_FragColor = vec4(color,1.0);
+}
+`;
+
+function createWaterGeometry(seg){
+  // A large plane follows world space and is dense enough near the camera
+  // for Gerstner displacement. Raising seg mostly improves silhouette quality.
+  const g = new THREE.PlaneGeometry(420, 420, seg, seg);
+  g.rotateX(-Math.PI/2);
+  return g;
+}
+
+const waterUniforms = {
+  ...shared,
+  uStorm:{value:0},
+  uLookDown:{value:0},
+  uEvening:{value:0},
+  uWaveCount:{value:quality.waveCount},
+  uWaveDir:{value:waveDir},
+  uWaveData:{value:waveData},
+  uDeepColor:{value:new THREE.Color('#05558d')},
+  uShallowColor:{value:new THREE.Color('#20d6d2')},
+  uSkyColor:{value:new THREE.Color('#79c9ee')},
+  uSunColor:{value:new THREE.Color('#fff4cc')},
+  uRockPos:{value:rockPositions}
+};
+
+const waterMat = new THREE.ShaderMaterial({
+  uniforms:waterUniforms,
+  vertexShader:waterVertex,
+  fragmentShader:waterFragment,
+  side:THREE.DoubleSide
+});
+
+let water = new THREE.Mesh(createWaterGeometry(quality.waterSeg), waterMat);
+water.frustumCulled = false;
+scene.add(water);
+
+// ---------- Seabed / shallow caustics ----------
+const bedMat = new THREE.ShaderMaterial({
+  uniforms:{
+    uTime:shared.uTime,
+    uMode:shared.uMode,
+    uStorm:{value:0}
+  },
+  vertexShader:/* glsl */`
+    varying vec3 vW;
+    varying vec2 vUv;
+    void main(){
+      vUv=uv;
+      vec4 w=modelMatrix*vec4(position,1.0);
+      vW=w.xyz;
+      gl_Position=projectionMatrix*viewMatrix*w;
+    }`,
+  fragmentShader:/* glsl */`
+    precision highp float;
+    uniform float uTime;
+    uniform float uStorm;
+    varying vec3 vW;
+    varying vec2 vUv;
+    float h(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+    float n(vec2 p){
+      vec2 i=floor(p),f=fract(p); f=f*f*(3.-2.*f);
+      return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x),f.y);
+    }
+    float ca(vec2 p){
+      float a=0.;
+      for(int i=0;i<3;i++){
+        vec2 q=abs(fract(p)-.5);
+        float line=.018/max(min(q.x,q.y),.018);
+        a+=line;
+        p=mat2(1.2,-.8,.8,1.2)*p*1.17+vec2(.13,.27)+uTime*.025;
+      }
+      return smoothstep(1.25,2.4,a);
+    }
+    void main(){
+      float sand=n(vW.xz*.22)*.18;
+      vec3 base=mix(vec3(.08,.28,.30),vec3(.13,.48,.47),sand+.28);
+      float c=ca(vW.xz*.32);
+      base+=vec3(.16,.58,.52)*c*(1.-uStorm)*.55;
+      gl_FragColor=vec4(base,1.);
+    }`
+});
+const bed = new THREE.Mesh(new THREE.PlaneGeometry(190,190,1,1),bedMat);
+bed.rotation.x=-Math.PI/2;
+bed.position.y=-3.1;
+scene.add(bed);
+
+// ---------- Procedural rock geometry ----------
+function seeded(seed){
+  let s = Math.sin(seed*12.9898)*43758.5453;
+  return () => {
+    s = Math.sin(s*12.9898+78.233)*43758.5453;
+    return s-Math.floor(s);
+  };
+}
+
+function createRockGeometry(r=4,h=5,seed=1, detail=30){
+  const rnd = seeded(seed);
+  const rings = Math.max(8, Math.floor(detail*.55));
+  const sides = detail;
+  const verts=[], indices=[], uvs=[];
+
+  for(let y=0;y<=rings;y++){
+    const t=y/rings;
+    const py=-2.6 + t*h;
+    // widest around lower-middle, narrowing near top and underwater base
+    const profile = Math.sin(Math.pow(t,.85)*Math.PI)*.58 + .36;
+    for(let i=0;i<sides;i++){
+      const a=i/sides*Math.PI*2;
+      const lump = 1
+        + .16*Math.sin(a*3.0+seed)
+        + .11*Math.sin(a*5.0-seed*1.3)
+        + .06*Math.sin(a*9.0+seed*.7);
+      const vertical = 1 + .07*Math.sin(t*13.0+a*2.0);
+      const rr=r*profile*lump*vertical;
+      const jitter=(rnd()-.5)*.10*r;
+      verts.push(Math.cos(a)*rr+jitter*.2, py+(rnd()-.5)*.11, Math.sin(a)*rr+jitter*.2);
+      uvs.push(i/sides,t);
+    }
+  }
+  for(let y=0;y<rings;y++){
+    for(let i=0;i<sides;i++){
+      const a=y*sides+i, b=y*sides+(i+1)%sides;
+      const c=(y+1)*sides+i, d=(y+1)*sides+(i+1)%sides;
+      indices.push(a,c,b,b,c,d);
+    }
+  }
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.Float32BufferAttribute(verts,3));
+  g.setAttribute('uv',new THREE.Float32BufferAttribute(uvs,2));
+  g.setIndex(indices);
+  g.computeVertexNormals();
+  return g;
+}
+
+const rockMat = new THREE.ShaderMaterial({
+  uniforms:{
+    uTime:shared.uTime,
+    uSunDir:shared.uSunDir,
+    uMode:shared.uMode,
+    uStorm:{value:0},
+    uSunColor:waterUniforms.uSunColor
+  },
+  vertexShader:/* glsl */`
+    varying vec3 vW;
+    varying vec3 vN;
+    varying float vY;
+    void main(){
+      vec4 w=modelMatrix*vec4(position,1.);
+      vW=w.xyz; vY=w.y;
+      vN=normalize(mat3(modelMatrix)*normal);
+      gl_Position=projectionMatrix*viewMatrix*w;
+    }`,
+  fragmentShader:/* glsl */`
+    precision highp float;
+    uniform float uTime;
+    uniform float uStorm;
+    uniform vec3 uSunDir;
+    uniform vec3 uSunColor;
+    varying vec3 vW; varying vec3 vN; varying float vY;
+    float h(vec2 p){return fract(sin(dot(p,vec2(41.7,289.1)))*45758.5453);}
+    float n(vec2 p){
+      vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
+      return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x),f.y);
+    }
+    float ca(vec2 p){
+      float a=0.;
+      for(int i=0;i<3;i++){
+        p=abs(fract(p)-.5);
+        a+=.018/max(min(p.x,p.y),.018);
+        p=p*1.47+uTime*.018;
+      }
+      return smoothstep(1.1,2.2,a);
+    }
+    void main(){
+      vec3 N=normalize(vN);
+      float ndl=max(dot(N,normalize(uSunDir)),0.);
+      float grain=n(vW.xz*1.7+vW.y*.8);
+      vec3 rock=mix(vec3(.025,.033,.038),vec3(.13,.15,.15),grain*.55+ndl*.28);
+      float wet=1.-smoothstep(.15,1.45,vY);
+      rock=mix(rock,rock*.43,wet*.75);
+      float underwater=1.-smoothstep(-.55,.18,vY);
+      float c=ca(vW.xz*.55+vW.y*.11)*underwater*(1.-uStorm);
+      rock+=vec3(.06,.48,.43)*c*.85;
+      rock+=uSunColor*ndl*.08;
+      gl_FragColor=vec4(rock,1.);
+    }`
+});
+
+const rockGroup = new THREE.Group();
+scene.add(rockGroup);
+
+function rebuildRocks(){
+  rockGroup.clear();
+  for(const r of ROCKS){
+    const m=new THREE.Mesh(createRockGeometry(r.r,r.h,r.seed,quality.rockDetail),rockMat);
+    m.position.set(r.x,0,r.z);
+    m.rotation.y=r.seed*.7;
+    rockGroup.add(m);
+  }
+}
+rebuildRocks();
+
+// ---------- Procedural sky dome ----------
+const skyMat = new THREE.ShaderMaterial({
+  side:THREE.BackSide,
+  depthWrite:false,
+  uniforms:{
+    uTime:shared.uTime,
+    uMode:shared.uMode,
+    uCloudSteps:{value:quality.cloudSteps},
+    uSkyTop:{value:new THREE.Color('#2f8ed0')},
+    uSkyHorizon:{value:new THREE.Color('#b9ebf5')},
+    uCloud:{value:new THREE.Color('#ffffff')},
+    uSunDir:shared.uSunDir
+  },
+  vertexShader:/* glsl */`
+    varying vec3 vPos;
+    void main(){
+      vPos=position;
+      gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);
+    }`,
+  fragmentShader:/* glsl */`
+    precision highp float;
+    uniform float uTime;
+    uniform int uCloudSteps;
+    uniform vec3 uSkyTop;
+    uniform vec3 uSkyHorizon;
+    uniform vec3 uCloud;
+    uniform vec3 uSunDir;
+    varying vec3 vPos;
+
+    float h(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+    float n(vec2 p){
+      vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
+      return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x),f.y);
+    }
+    float fbm(vec2 p){
+      float f=0.,a=.52;
+      for(int i=0;i<7;i++){
+        if(i>=uCloudSteps)break;
+        f+=a*n(p); p=mat2(1.63,-1.11,1.11,1.63)*p+3.1; a*=.51;
+      }
+      return f;
+    }
+    void main(){
+      vec3 d=normalize(vPos);
+      float horizon=pow(clamp(1.-max(d.y,0.),0.,1.),2.);
+      vec3 col=mix(uSkyTop,uSkyHorizon,horizon);
+
+      vec2 p=d.xz/max(d.y+.28,.18)*1.45;
+      float f=fbm(p+vec2(uTime*.004,-uTime*.002));
+      float cloud=smoothstep(.49,.72,f)*smoothstep(-.02,.30,d.y);
+      float silver=pow(max(dot(d,normalize(uSunDir)),0.),18.);
+      vec3 cc=mix(uCloud,uCloud*vec3(.76,.80,.83),smoothstep(.52,.78,f));
+      cc+=silver*.28;
+      col=mix(col,cc,cloud*.72);
+
+      float sunDisk=pow(max(dot(d,normalize(uSunDir)),0.),700.);
+      col+=vec3(1.,.86,.58)*sunDisk*2.1;
+      gl_FragColor=vec4(col,1.);
+    }`
+});
+const sky = new THREE.Mesh(new THREE.SphereGeometry(520,48,28),skyMat);
+scene.add(sky);
+
+// ---------- Mode system ----------
+const MODES = [
+  {
+    skyTop:'#2b91d5', horizon:'#b5edf7', cloud:'#ffffff',
+    deep:'#07578f', shallow:'#24d9d3', sun:'#fff6d7',
+    fog:'#83bed0', fogDensity:.00235, sunI:5.4, hemiI:1.75, exposure:1.04,
+    storm:0, lookDown:0, evening:0
+  },
+  {
+    skyTop:'#318ec4', horizon:'#a9e2ec', cloud:'#ffffff',
+    deep:'#075b86', shallow:'#35e6d7', sun:'#fff7da',
+    fog:'#77b5c4', fogDensity:.0026, sunI:5.0, hemiI:1.65, exposure:1.0,
+    storm:0, lookDown:1, evening:0
+  },
+  {
+    skyTop:'#6f7595', horizon:'#f2aa78', cloud:'#f8d6c1',
+    deep:'#174c68', shallow:'#4ec1b7', sun:'#ffd199',
+    fog:'#bd8f80', fogDensity:.0032, sunI:3.4, hemiI:1.15, exposure:.96,
+    storm:0, lookDown:.25, evening:1
+  },
+  {
+    skyTop:'#263440', horizon:'#71848c', cloud:'#9ba4a8',
+    deep:'#103646', shallow:'#28767a', sun:'#d8e1e5',
+    fog:'#53656c', fogDensity:.0055, sunI:1.25, hemiI:.72, exposure:.82,
+    storm:1, lookDown:0, evening:0
+  }
+];
+
+let modeIndex=0;
+let autoCycle=true;
+let modeStart=performance.now();
+const CYCLE_MS=7200;
+const transition = {
+  t:1,
+  duration:1.8,
+  from:null,
+  to:null
+};
+
+function snapshotMode(){
+  return {
+    skyTop:skyMat.uniforms.uSkyTop.value.clone(),
+    horizon:skyMat.uniforms.uSkyHorizon.value.clone(),
+    cloud:skyMat.uniforms.uCloud.value.clone(),
+    deep:waterUniforms.uDeepColor.value.clone(),
+    shallow:waterUniforms.uShallowColor.value.clone(),
+    sun:waterUniforms.uSunColor.value.clone(),
+    fog:scene.fog.color.clone(),
+    fogDensity:scene.fog.density,
+    sunI:sun.intensity, hemiI:hemi.intensity, exposure:renderer.toneMappingExposure,
+    storm:waterUniforms.uStorm.value,
+    lookDown:waterUniforms.uLookDown.value,
+    evening:waterUniforms.uEvening.value
+  };
+}
+
+function normalizeTarget(m){
+  return {
+    ...m,
+    skyTop:new THREE.Color(m.skyTop), horizon:new THREE.Color(m.horizon), cloud:new THREE.Color(m.cloud),
+    deep:new THREE.Color(m.deep), shallow:new THREE.Color(m.shallow), sun:new THREE.Color(m.sun),
+    fog:new THREE.Color(m.fog)
+  };
+}
+
+function setMode(i, manual=false){
+  modeIndex=((i%4)+4)%4;
+  shared.uMode.value=modeIndex;
+  modeLabel.textContent=labels[modeIndex];
+  document.querySelectorAll('[data-mode]').forEach((b,k)=>b.classList.toggle('active',k===modeIndex));
+  transition.from=snapshotMode();
+  transition.to=normalizeTarget(MODES[modeIndex]);
+  transition.t=0;
+  modeStart=performance.now();
+  if(manual){ autoCycle=false; autoBtn.classList.remove('active'); }
+}
+
+function applyModeTransition(dt){
+  if(transition.t>=1 || !transition.to)return;
+  transition.t=Math.min(1,transition.t+dt/transition.duration);
+  const k=transition.t*transition.t*(3-2*transition.t);
+  const a=transition.from,b=transition.to;
+  const lerpC=(dst,c1,c2)=>dst.copy(c1).lerp(c2,k);
+  lerpC(skyMat.uniforms.uSkyTop.value,a.skyTop,b.skyTop);
+  lerpC(skyMat.uniforms.uSkyHorizon.value,a.horizon,b.horizon);
+  lerpC(skyMat.uniforms.uCloud.value,a.cloud,b.cloud);
+  lerpC(waterUniforms.uDeepColor.value,a.deep,b.deep);
+  lerpC(waterUniforms.uShallowColor.value,a.shallow,b.shallow);
+  lerpC(waterUniforms.uSunColor.value,a.sun,b.sun);
+  lerpC(scene.fog.color,a.fog,b.fog);
+  scene.fog.density=THREE.MathUtils.lerp(a.fogDensity,b.fogDensity,k);
+  sun.intensity=THREE.MathUtils.lerp(a.sunI,b.sunI,k);
+  hemi.intensity=THREE.MathUtils.lerp(a.hemiI,b.hemiI,k);
+  renderer.toneMappingExposure=THREE.MathUtils.lerp(a.exposure,b.exposure,k);
+  waterUniforms.uStorm.value=THREE.MathUtils.lerp(a.storm,b.storm,k);
+  bedMat.uniforms.uStorm.value=waterUniforms.uStorm.value;
+  rockMat.uniforms.uStorm.value=waterUniforms.uStorm.value;
+  waterUniforms.uLookDown.value=THREE.MathUtils.lerp(a.lookDown,b.lookDown,k);
+  waterUniforms.uEvening.value=THREE.MathUtils.lerp(a.evening,b.evening,k);
+}
+
+// ---------- Cinematic camera ----------
+function cameraPose(t, mode){
+  // Curves are intentionally gentle to avoid motion sickness on phones.
+  let radius=30+5*Math.sin(t*.11);
+  let y=9.5+2.8*Math.sin(t*.17);
+  let a=t*.055;
+  let targetY=.1;
+
+  if(mode===1){
+    radius=24+3*Math.sin(t*.12);
+    y=15.5+2.5*Math.sin(t*.15);
+    targetY=-1.0;
+  }else if(mode===2){
+    radius=34;
+    y=7.0+1.6*Math.sin(t*.14);
+  }else if(mode===3){
+    radius=27+2*Math.sin(t*.2);
+    y=5.7+1.2*Math.sin(t*.23);
+    a=t*.07;
+  }
+
+  const p=new THREE.Vector3(Math.cos(a)*radius,y,Math.sin(a)*radius);
+  // Offset the orbit so it naturally passes close to the main rock cluster.
+  p.x-=2.5; p.z+=1.5;
+  const target=new THREE.Vector3(-1.5,targetY,1.2);
+  return {p,target};
+}
+
+// ---------- Launch ----------
+enterOceanBtn.addEventListener('click', async ()=>{
+  sceneStarted = true;
+  launchScreen.classList.add('hidden');
+
+  // Request fullscreen where supported. iPhone Safari does not expose the
+  // standard fullscreen API for arbitrary page elements, so this fails safely.
+  try{
+    if (document.documentElement.requestFullscreen && !document.fullscreenElement && !/iPhone/i.test(navigator.userAgent)) {
+      await document.documentElement.requestFullscreen();
+    }
+  }catch(e){}
+
+  // Reset the performance window after the launch overlay disappears.
+  frameCounter = 0;
+  fpsClock = performance.now();
+});
+
+addEventListener('orientationchange',()=>setTimeout(updateLaunchSummary,150));
+addEventListener('resize',updateLaunchSummary);
+
+// ---------- UI ----------
+document.querySelectorAll('[data-mode]').forEach(btn=>{
+  btn.addEventListener('click',()=>setMode(Number(btn.dataset.mode),true));
+});
+
+autoBtn.addEventListener('click',()=>{
+  autopilot=!autopilot;
+  autoCycle=autopilot;
+  autoBtn.classList.toggle('active',autopilot);
+  modeStart=performance.now();
+});
+
+$('#helpBtn').addEventListener('click',()=>help.classList.toggle('show'));
+
+const qualityOrder=['mobile','balanced','high','ultra'];
+function cycleQuality(){
+  const i=qualityOrder.indexOf(qualityName);
+  applyQuality(qualityOrder[(i+1)%qualityOrder.length],false);
+}
+
+qualitySelect.addEventListener('change',()=>{
+  const v=qualitySelect.value;
+  applyQuality(v==='auto'?autoPresetName():v,v==='auto');
+});
+
+function applyQuality(name,isAuto=false){
+  qualityName=name;
+  quality=PRESETS[name];
+  dynamicScale=1;
+  renderer.setPixelRatio(effectivePixelRatio());
+  renderer.setSize(innerWidth,innerHeight,false);
+  skyMat.uniforms.uCloudSteps.value=quality.cloudSteps;
+  waterUniforms.uWaveCount.value=quality.waveCount;
+
+  const old=water.geometry;
+  water.geometry=createWaterGeometry(quality.waterSeg);
+  old.dispose();
+  rebuildRocks();
+
+  qualityReadout.textContent=`quality: ${isAuto?'auto · ':''}${name}`;
+  if(!isAuto) qualitySelect.value=name;
+}
+
+qualityReadout.textContent=`quality: auto · ${qualityName}`;
+
+addEventListener('keydown',e=>{
+  if(e.key>='1'&&e.key<='4')setMode(Number(e.key)-1,true);
+  if(e.key.toLowerCase()==='a'){
+    autopilot=!autopilot; autoCycle=autopilot;
+    autoBtn.classList.toggle('active',autopilot);
+  }
+  if(e.key.toLowerCase()==='q')cycleQuality();
+  if(e.key.toLowerCase()==='h')help.classList.toggle('show');
+});
+
+// ---------- Adaptive resolution ----------
+// Only Auto Quality adjusts render scale. It reacts slowly, preventing visual
+// "pumping" and keeping the artistic settings stable while chasing frame rate.
+let frameCounter=0, fpsClock=performance.now(), fpsSmooth=60, autoQualityEnabled=true;
+
+function updatePerformance(now){
+  frameCounter++;
+  const elapsed=now-fpsClock;
+  if(elapsed>900){
+    const fps=frameCounter*1000/elapsed;
+    fpsSmooth=THREE.MathUtils.lerp(fpsSmooth,fps,.5);
+    perfEl.textContent=`${fpsSmooth.toFixed(0)} fps · ${Math.round(dynamicScale*100)}% scale`;
+    frameCounter=0; fpsClock=now;
+
+    autoQualityEnabled = qualitySelect.value==='auto';
+    if(autoQualityEnabled){
+      let changed=false;
+      if(fpsSmooth<42 && dynamicScale>.60){ dynamicScale=Math.max(.60,dynamicScale-.08); changed=true; }
+      if(fpsSmooth>57 && dynamicScale<1.0){ dynamicScale=Math.min(1.0,dynamicScale+.035); changed=true; }
+      if(changed){
+        renderer.setPixelRatio(effectivePixelRatio());
+        renderer.setSize(innerWidth,innerHeight,false);
+      }
+    }
+  }
+}
+
+// ---------- Resize ----------
+addEventListener('resize',()=>{
+  camera.aspect=innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setPixelRatio(effectivePixelRatio());
+  renderer.setSize(innerWidth,innerHeight,false);
+});
+
+// ---------- Animation ----------
+const clock=new THREE.Clock();
+let elapsed=0;
+let currentTarget=new THREE.Vector3();
+
+function animate(now){
+  requestAnimationFrame(animate);
+  const dt=Math.min(clock.getDelta(),.05);
+
+  if(!sceneStarted){
+    controls.update();
+    renderer.render(scene,camera);
+    return;
+  }
+
+  elapsed+=dt;
+
+  shared.uTime.value=elapsed;
+  shared.uCameraPos.value.copy(camera.position);
+  applyModeTransition(dt);
+
+  // Atmospheres auto-cycle while cinematic mode is active.
+  if(autoCycle && now-modeStart>CYCLE_MS){
+    setMode((modeIndex+1)%4,false);
+  }
+
+  if(autopilot && !userInteracting){
+    const pose=cameraPose(elapsed,modeIndex);
+    camera.position.lerp(pose.p,1-Math.pow(.001,dt));
+    currentTarget.lerp(pose.target,1-Math.pow(.001,dt));
+    controls.target.copy(currentTarget);
+    camera.lookAt(currentTarget);
+  }
+
+  controls.update();
+
+  // Storm winds slightly alter the sun for more dynamic highlights.
+  const storm=waterUniforms.uStorm.value;
+  shared.uSunDir.value.set(
+    -.35 + Math.sin(elapsed*.11)*.04*storm,
+     .82 - .18*storm,
+     .44 + Math.cos(elapsed*.09)*.04*storm
+  ).normalize();
+
+  renderer.render(scene,camera);
+  updatePerformance(now);
+}
+
+setMode(0,false);
+transition.t=1;
+animate(performance.now());
+
+</script>
+</body>
+</html>
